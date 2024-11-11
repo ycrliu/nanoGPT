@@ -24,7 +24,7 @@ def sparsify_threshold_based(model, sparsity_level):
 
 
 
-def sparsify_random_based(model, sparsity_level):
+def sparsify_random_based(model, sparsity_level,):
     """
     Applies static sparsification to a given `model` by pruning its weights.
     Uses a threshold-based sparsification (magnitude-based) by removing weights with the
@@ -40,7 +40,7 @@ def sparsify_random_based(model, sparsity_level):
             param_data *= mask
 
 
-def assess_sparsity_structure(model):
+def assess_sparsity_structure(model, sparsed=False):
 
     sparsity_data = []  # List to store sparsity data for each layer
     layer_weights = defaultdict(list)
@@ -67,7 +67,7 @@ def assess_sparsity_structure(model):
         plt.xlabel("Weight Value")
         plt.ylabel("Frequency")
         plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
-        plt.savefig(f"layer_{layer_name}_weight_distribution.png")
+        plt.savefig(f"{'after' if sparsed else 'before'}_layer_{layer_name}_weight_distribution.png")
         plt.close()
 
     # Plot fraction of non-zero weights by layer
@@ -79,10 +79,10 @@ def assess_sparsity_structure(model):
     plt.xticks(rotation=90)
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.title("Non-Zero Weight Fractions by Layer")
-    plt.savefig(f"all_layers_{layer_name}_weight_distribution.png")
+    plt.savefig(f"{'after' if sparsed else 'before'}_all_layers_{layer_name}_weight_distribution.png")
     plt.close()
 
-def assess_overall_weight_distribution(model):
+def assess_overall_weight_distribution(model, sparsed=False):
     """
     Aggregates and plots the weight distribution across all layers in the model.
     """
@@ -103,5 +103,5 @@ def assess_overall_weight_distribution(model):
     plt.xlabel("Weight Value")
     plt.ylabel("Count")
     plt.title("Overall Weight Distribution Across All Layers")
-    plt.savefig(f"overall_weight_distribution_{name}.png")  # Save plot for each layer
+    plt.savefig(f"{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")  # Save plot for each layer
     plt.close()
