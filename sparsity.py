@@ -24,7 +24,7 @@ def sparsify_threshold_based(model, sparsity_level):
     # Calculate the threshold and apply sparsity for each layer
     for layer, params in layer_weights.items():
         # Collect all weights across the entire layer to compute a global threshold
-        all_weights = torch.cat([param.data.view(-1).abs() for _, param in params])
+        all_weights = torch.cat([param.data.view(-1).abs() for param in params])
         
         # Determine the threshold for pruning based on the desired sparsity level
         sorted_weights, _ = torch.sort(all_weights.view(-1))
