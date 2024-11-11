@@ -27,7 +27,10 @@ def sparsify_threshold_based(model, sparsity_level):
         all_weights = torch.cat([param.data.view(-1).abs() for _, param in params])
         
         # Determine the threshold for pruning based on the desired sparsity level
-        threshold = torch.quantile(all_weights, sparsity_level / 100.0)
+        sorted_weights, _ = torch.sort(all_weights.view(-1))
+        cutoff_index = int(sparsity_level / 100 * sorted_weights.numel())
+        threshold = sorted_weights[cutoff_index]
+
         
         # Zero out each parameter tensor entirely if it falls below the global threshold
         for name, param in params:
