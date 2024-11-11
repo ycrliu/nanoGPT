@@ -331,38 +331,3 @@ class GPT(nn.Module):
         return idx
 
 
-
-def sparsify_threshold_based(model, sparsity_level):
-    """
-    Applies static sparsification to a given `model` by pruning its weights.
-    Uses a threshold-based sparsification (magnitude-based) by removing weights with the
-    smallest magnitudes, under the assumption that smaller weights contribute less to the output.
-
-    sparsity_level: percentage between 0 and 100, represents the amount reduced
-    """
-
-    for name, param in model.named_parameters():
-        if "weight" in name:
-            # Flatten weights and calculate threshold for sparsification
-            param_data = param.data.view(-1)
-            threshold = torch.quantile(param_data.abs(), sparsity_level)
-
-            # Zero out weights below the threshold
-            param_data[param_data.abs() < threshold] = 0
-
-
-
-def sparsify_random_based(model, sparsity_level):
-    """
-    Applies static sparsification to a given `model` by pruning its weights.
-    Uses a threshold-based sparsification (magnitude-based) by removing weights with the
-    smallest magnitudes, under the assumption that smaller weights contribute less to the output.
-
-    sparsity_level: percentage between 0 and 100, represents the amount reduced
-    """
-
-    for name, param in model.named_parameters():
-        if "weight" in name:
-            param_data = param.data.view(-1)
-            mask = torch.rand_like(param_data) > sparsity_level
-            param_data *= mask
