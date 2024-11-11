@@ -14,16 +14,22 @@ def sparsify_threshold_based(model, sparsity_level):
     sparsity_level: percentage between 0 and 100, represents the amount of weights to be pruned.
     """
     for name, param in model.named_parameters():
-        if "weight" in name:
-            param_data = param.data
-            # Flatten and sort the absolute values to find the cutoff for sparsity
-            sorted_weights, _ = torch.sort(param_data.abs().view(-1))
-            cutoff_index = int(sparsity_level / 100 * sorted_weights.numel())
-            threshold = sorted_weights[cutoff_index]
+        if "weight" in name and param.requires_grad and param.dim() >= 2:
 
-            # Zero out weights below the threshold
-            param_data[param_data.abs() < threshold] = 0
+            # Flatten the parameter to easily access all values
+            flat_weights = param.data.view(-1)
 
+            # Calculate the threshold below which weights will be zeroed
+            k = int(flat_weights.numel() * (sparsity_level / 100))
+            if k == 0:
+                continue  # Skip sparsification if the reduction percentage is very small
+
+            # Get the absolute values of weights and find the threshold value
+            threshold = flat_weights.abs().topk(k, largest=False).values.max()
+
+            # Apply sparsity by setting weights below the threshold to zero
+            mask = param.data.abs() >= threshold
+            param.data *= mask  # Zero out the small-magnitude weights
 
 
 def sparsify_random_based(model, sparsity_level,):
@@ -42,7 +48,7 @@ def sparsify_random_based(model, sparsity_level,):
             param_data *= mask
 
 
-def assess_sparsity_structure(model, sparsed=False):
+def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8):
 
     sparsity_data = []  # List to store sparsity data for each layer
     layer_weights = defaultdict(list)
@@ -59,18 +65,10 @@ def assess_sparsity_structure(model, sparsed=False):
         # Concatenate weights in the layer and calculate sparsity
         all_weights = torch.tensor(np.concatenate(weights_list))
         total_elements = all_weights.numel()
-        non_zero_elements = torch.sum(all_weights != 0).item()
+        non_zero_elements = torch.sum(all_weights.abs() > zero_tol).item()
         sparsity_fraction = non_zero_elements / total_elements  # Fraction of weights > 0
         layer_sparsity_data[layer_name] = sparsity_fraction
 
-        # Plot the weight distribution for each layer
-        # plt.figure(figsize=(10, 5))
-        # plt.hist(all_weights.numpy(), bins=50, range=(-0.75, 0.75))  # Adjust range as needed
-        # plt.xlabel("Weight Value")
-        # plt.ylabel("Frequency")
-        # plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
-        # plt.savefig(f"{'after' if sparsed else 'before'}_layer_{layer_name}_weight_distribution.png")
-        # plt.close()
 
     # Plot fraction of non-zero weights by layer
     layer_names = list(layer_sparsity_data.keys())
