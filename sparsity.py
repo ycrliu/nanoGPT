@@ -4,20 +4,22 @@ from model import GPTConfig, GPT
 import numpy as np
 from collections import defaultdict
 
+
 def sparsify_threshold_based(model, sparsity_level):
     """
     Applies static sparsification to a given `model` by pruning its weights.
     Uses a threshold-based sparsification (magnitude-based) by removing weights with the
     smallest magnitudes, under the assumption that smaller weights contribute less to the output.
 
-    sparsity_level: percentage between 0 and 100, represents the amount reduced
+    sparsity_level: percentage between 0 and 100, represents the amount of weights to be pruned.
     """
-
     for name, param in model.named_parameters():
         if "weight" in name:
-            # Flatten weights and calculate threshold for sparsification
-            param_data = param.data.view(-1)
-            threshold = torch.quantile(param_data.abs(), sparsity_level / 100)
+            param_data = param.data
+            # Flatten and sort the absolute values to find the cutoff for sparsity
+            sorted_weights, _ = torch.sort(param_data.abs().view(-1))
+            cutoff_index = int(sparsity_level / 100 * sorted_weights.numel())
+            threshold = sorted_weights[cutoff_index]
 
             # Zero out weights below the threshold
             param_data[param_data.abs() < threshold] = 0
