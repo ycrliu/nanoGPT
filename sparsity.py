@@ -63,7 +63,7 @@ def assess_sparsity_structure(model, sparsed=False):
 
         # Plot the weight distribution for each layer
         plt.figure(figsize=(10, 5))
-        plt.hist(all_weights.numpy(), bins=50, range=(-0.1, 0.1))  # Adjust range as needed
+        plt.hist(all_weights.numpy(), bins=50, range=(-0.75, 0.75))  # Adjust range as needed
         plt.xlabel("Weight Value")
         plt.ylabel("Frequency")
         plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
@@ -78,6 +78,7 @@ def assess_sparsity_structure(model, sparsed=False):
     plt.bar(layer_names, non_zero_fractions)
     plt.xticks(rotation=90)
     plt.ylabel("Fraction of Non-Zero Weights")
+    plt.xlabel("Layer Index")
     plt.title("Non-Zero Weight Fractions by Layer")
     plt.savefig(f"{'after' if sparsed else 'before'}_all_layers_{layer_name}_weight_distribution.png")
     plt.close()
@@ -99,8 +100,8 @@ def assess_overall_weight_distribution(model, sparsed=False):
 
     # Plot the overall weight distribution
     plt.figure(figsize=(10, 5))
-    plt.hist(all_weights, bins=50, range=(-0.1, 0.1))
-    plt.xlabel("Weight Value")
+    plt.hist(all_weights, bins=50, range=(-0.75, 0.75))
+    plt.xlabel("Weights")
     plt.ylabel("Count")
     plt.title("Overall Weight Distribution Across All Layers")
     plt.savefig(f"{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")  # Save plot for each layer
