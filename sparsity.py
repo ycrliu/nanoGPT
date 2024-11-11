@@ -1,9 +1,8 @@
 import torch
 import matplotlib.pyplot as plt
 from model import GPTConfig, GPT
-from IPython.display import Image, display
 import numpy as np
-import os
+from collections import defaultdict
 
 def sparsify_threshold_based(model, sparsity_level):
     """
@@ -44,38 +43,44 @@ def sparsify_random_based(model, sparsity_level):
 def assess_sparsity_structure(model):
 
     sparsity_data = []  # List to store sparsity data for each layer
+    layer_weights = defaultdict(list)
 
     # Go through each parameter in the model
     for name, param in model.named_parameters():
         if "weight" in name:  # Filter to include only weight parameters
-            total_elements = param.numel()
-            non_zero_elements = torch.sum(param != 0).item()
+            layer = name.split(".")[3]
+            layer_weights[layer].append(param.cpu().detach().numpy().flatten())
 
-            sparsity_fraction = non_zero_elements / total_elements  # Fraction of weights > 0
-            sparsity_data.append((name, sparsity_fraction, param.cpu().detach().numpy()))
+    # Calculate sparsity and plot for each layer
+    layer_sparsity_data = {}  # Store sparsity data for each layer
+    for layer_name, weights_list in layer_weights.items():
+        # Concatenate weights in the layer and calculate sparsity
+        all_weights = torch.tensor(np.concatenate(weights_list))
+        total_elements = all_weights.numel()
+        non_zero_elements = torch.sum(all_weights != 0).item()
+        sparsity_fraction = non_zero_elements / total_elements  # Fraction of weights > 0
+        layer_sparsity_data[layer_name] = sparsity_fraction
 
-    # Plot sparsity data
-    layer_names = [x[0] for x in sparsity_data]
-    non_zero_fractions = [x[1] for x in sparsity_data]
+        # Plot the weight distribution for each layer
+        plt.figure(figsize=(10, 5))
+        plt.hist(all_weights.numpy(), bins=50, range=(-0.1, 0.1))  # Adjust range as needed
+        plt.xlabel("Weight Value")
+        plt.ylabel("Frequency")
+        plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
+        plt.savefig(f"layer_{layer_name}_weight_distribution.png")
+        plt.close()
 
     # Plot fraction of non-zero weights by layer
+    layer_names = list(layer_sparsity_data.keys())
+    non_zero_fractions = list(layer_sparsity_data.values())
+
     plt.figure(figsize=(12, 6))
     plt.bar(layer_names, non_zero_fractions)
     plt.xticks(rotation=90)
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.title("Non-Zero Weight Fractions by Layer")
-    plt.savefig("non_zero_fractions.png")
-    plt.close()
-
-    # Plot weight distributions for feedforward layers
-    for name, sparsity_fraction, weights in sparsity_data:
-        plt.figure(figsize=(10, 5))
-        plt.hist(weights.flatten(), bins=50, range=(-0.1, 0.1))
-        plt.xlabel("Weight Value")
-        plt.ylabel("Frequency")
-        plt.title(f"Weight Distribution for Layer: {name}")
-        plt.savefig(f"now_weight_distribution_{name}.png")  # Save plot for each layer
-        plt.close()
+    plt.savefig(f"all_layers_{layer_name}_weight_distribution.png")
+    plt.show()
 
 def assess_overall_weight_distribution(model):
     """
