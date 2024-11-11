@@ -19,7 +19,7 @@ def sparsify_threshold_based(model, sparsity_level):
         if "weight" in name:  # Filter to include only weight parameters
             if len(name.split(".")) < 4: continue
             layer = name.split(".")[3]
-            layer_weights[layer].append((layer, param))
+            layer_weights[layer].append(param)
     
     # Calculate the threshold and apply sparsity for each layer
     for layer, params in layer_weights.items():
