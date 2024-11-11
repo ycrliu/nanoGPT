@@ -17,7 +17,7 @@ def sparsify_threshold_based(model, sparsity_level):
         if "weight" in name:
             # Flatten weights and calculate threshold for sparsification
             param_data = param.data.view(-1)
-            threshold = torch.quantile(param_data.abs(), sparsity_level)
+            threshold = torch.quantile(param_data.abs(), sparsity_level / 100)
 
             # Zero out weights below the threshold
             param_data[param_data.abs() < threshold] = 0
@@ -36,7 +36,7 @@ def sparsify_random_based(model, sparsity_level,):
     for name, param in model.named_parameters():
         if "weight" in name:
             param_data = param.data.view(-1)
-            mask = torch.rand_like(param_data) > sparsity_level
+            mask = (torch.rand_like(param_data) > sparsity_level / 100).float()
             param_data *= mask
 
 
@@ -62,13 +62,13 @@ def assess_sparsity_structure(model, sparsed=False):
         layer_sparsity_data[layer_name] = sparsity_fraction
 
         # Plot the weight distribution for each layer
-        plt.figure(figsize=(10, 5))
-        plt.hist(all_weights.numpy(), bins=50, range=(-0.75, 0.75))  # Adjust range as needed
-        plt.xlabel("Weight Value")
-        plt.ylabel("Frequency")
-        plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
-        plt.savefig(f"{'after' if sparsed else 'before'}_layer_{layer_name}_weight_distribution.png")
-        plt.close()
+        # plt.figure(figsize=(10, 5))
+        # plt.hist(all_weights.numpy(), bins=50, range=(-0.75, 0.75))  # Adjust range as needed
+        # plt.xlabel("Weight Value")
+        # plt.ylabel("Frequency")
+        # plt.title(f"Weight Distribution for Layer: {layer_name} (Non-Zero Fraction: {sparsity_fraction:.2f})")
+        # plt.savefig(f"{'after' if sparsed else 'before'}_layer_{layer_name}_weight_distribution.png")
+        # plt.close()
 
     # Plot fraction of non-zero weights by layer
     layer_names = list(layer_sparsity_data.keys())
