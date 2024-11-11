@@ -48,7 +48,8 @@ def assess_sparsity_structure(model):
     for name, param in model.named_parameters():
         if "weight" in name:  # Filter to include only weight parameters
             total_elements = param.numel()
-            non_zero_elements = param.nonzero().size(0)
+            non_zero_elements = torch.sum(param != 0).item()
+
             sparsity_fraction = non_zero_elements / total_elements  # Fraction of weights > 0
             sparsity_data.append((name, sparsity_fraction, param.cpu().detach().numpy()))
 
@@ -83,5 +84,25 @@ def assess_sparsity_structure(model):
             display(Image(filename=file))
 
 
+def assess_overall_weight_distribution(model):
+    """
+    Aggregates and plots the weight distribution across all layers in the model.
+    """
+    all_weights = []  # List to store all weights
 
+    # Collect weights from all layers
+    for name, param in model.named_parameters():
+        if "weight" in name:  # Filter to include only weight parameters
+            all_weights.append(param.cpu().detach().numpy().flatten())
 
+    # Flatten the list of arrays into a single array for plotting
+    all_weights = torch.tensor(all_weights).flatten().numpy()
+
+    # Plot the overall weight distribution
+    plt.figure(figsize=(10, 5))
+    plt.hist(all_weights, bins=50, range=(-0.1, 0.1))
+    plt.xlabel("Weight Value")
+    plt.ylabel("Count")
+    plt.title("Overall Weight Distribution Across All Layers")
+    plt.savefig(f"overall_weight_distribution_{name}.png")  # Save plot for each layer
+    plt.close()
