@@ -13,23 +13,26 @@ def sparsify_threshold_based(model, sparsity_level):
 
     sparsity_level: percentage between 0 and 100, represents the amount of weights to be pruned.
     """
+    # Group weights by layer
+    layer_weights = defaultdict(list)
     for name, param in model.named_parameters():
-        if "weight" in name and param.requires_grad and param.dim() >= 2:
-
-            # Flatten the parameter to easily access all values
-            flat_weights = param.data.view(-1)
-
-            # Calculate the threshold below which weights will be zeroed
-            k = int(flat_weights.numel() * (sparsity_level / 100))
-            if k == 0:
-                continue  # Skip sparsification if the reduction percentage is very small
-
-            # Get the absolute values of weights and find the threshold value
-            threshold = flat_weights.abs().topk(k, largest=False).values.max()
-
-            # Apply sparsity by setting weights below the threshold to zero
-            mask = param.data.abs() >= threshold
-            param.data *= mask  # Zero out the small-magnitude weights
+        if "weight" in name:  # Filter to include only weight parameters
+            layer = name.split(".")[3]
+            layer_weights[layer].append((layer, param))
+    
+    # Calculate the threshold and apply sparsity for each layer
+    for layer, params in layer_weights.items():
+        # Collect all weights across the entire layer to compute a global threshold
+        all_weights = torch.cat([param.data.view(-1).abs() for _, param in params])
+        
+        # Determine the threshold for pruning based on the desired sparsity level
+        threshold = torch.quantile(all_weights, sparsity_level / 100.0)
+        
+        # Zero out each parameter tensor entirely if it falls below the global threshold
+        for name, param in params:
+            # Check if the entire parameter tensor falls below the threshold
+            mask = (param.data.abs() >= threshold).float()  # 1 where tensor's magnitude is above threshold
+            param.data = param.data * mask
 
 
 def sparsify_random_based(model, sparsity_level,):
@@ -50,7 +53,6 @@ def sparsify_random_based(model, sparsity_level,):
 
 def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8):
 
-    sparsity_data = []  # List to store sparsity data for each layer
     layer_weights = defaultdict(list)
 
     # Go through each parameter in the model
