@@ -80,7 +80,7 @@ def assess_sparsity_structure(model):
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.title("Non-Zero Weight Fractions by Layer")
     plt.savefig(f"all_layers_{layer_name}_weight_distribution.png")
-    plt.show()
+    plt.close()
 
 def assess_overall_weight_distribution(model):
     """
