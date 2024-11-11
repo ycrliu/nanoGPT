@@ -2,6 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 from model import GPTConfig, GPT
 from IPython.display import Image, display
+import numpy as np
 import os
 
 def sparsify_threshold_based(model, sparsity_level):
@@ -96,7 +97,8 @@ def assess_overall_weight_distribution(model):
             all_weights.append(param.cpu().detach().numpy().flatten())
 
     # Flatten the list of arrays into a single array for plotting
-    all_weights = torch.tensor(all_weights).flatten().numpy()
+    all_weights = np.concatenate(all_weights)
+
 
     # Plot the overall weight distribution
     plt.figure(figsize=(10, 5))
