@@ -147,6 +147,7 @@ class GPT(nn.Module):
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
 
+
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
@@ -328,3 +329,40 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+
+
+def sparsify_threshold_based(model, sparsity_level):
+    """
+    Applies static sparsification to a given `model` by pruning its weights.
+    Uses a threshold-based sparsification (magnitude-based) by removing weights with the
+    smallest magnitudes, under the assumption that smaller weights contribute less to the output.
+
+    sparsity_level: percentage between 0 and 100, represents the amount reduced
+    """
+
+    for name, param in model.named_parameters():
+        if "weight" in name:
+            # Flatten weights and calculate threshold for sparsification
+            param_data = param.data.view(-1)
+            threshold = torch.quantile(param_data.abs(), sparsity_level)
+
+            # Zero out weights below the threshold
+            param_data[param_data.abs() < threshold] = 0
+
+
+
+def sparsify_random_based(model, sparsity_level):
+    """
+    Applies static sparsification to a given `model` by pruning its weights.
+    Uses a threshold-based sparsification (magnitude-based) by removing weights with the
+    smallest magnitudes, under the assumption that smaller weights contribute less to the output.
+
+    sparsity_level: percentage between 0 and 100, represents the amount reduced
+    """
+
+    for name, param in model.named_parameters():
+        if "weight" in name:
+            param_data = param.data.view(-1)
+            mask = torch.rand_like(param_data) > sparsity_level
+            param_data *= mask
