@@ -334,6 +334,7 @@ while True:
         break
 
 assess_sparsity_structure(model)
+assess_overall_weight_distribution(model)
 
 if ddp:
     destroy_process_group()
