@@ -71,29 +71,3 @@ def assess_sparsity_structure(model):
         plt.title(f"Weight Distribution for Layer: {name}")
         plt.show()
 
-
-# Example Usage
-if __name__ == "__main__":
-
-    n_layer = 4
-    n_head = 4
-    n_embd = 64
-    max_iters = 150
-    eval_interval = 100
-    eval_iters = 100
-    bias = False
-    block_size = 64
-    batch_size = 8
-    dropout = 0.1
-    model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                      bias=bias, vocab_size=None, dropout=dropout)
-
-
-    config = GPTConfig(**model_args)
-    model = GPT(config)
-
-    sparsity_level = 0.95
-
-    sparsify_threshold_based
-
-    assess_sparsity_structure(model)
