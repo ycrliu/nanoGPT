@@ -74,16 +74,8 @@ def assess_sparsity_structure(model):
         plt.xlabel("Weight Value")
         plt.ylabel("Frequency")
         plt.title(f"Weight Distribution for Layer: {name}")
-        plt.savefig(f"weight_distribution_{name}.png")  # Save plot for each layer
+        plt.savefig(f"now_weight_distribution_{name}.png")  # Save plot for each layer
         plt.close()
-
-    # Display the non-zero fractions plot
-    display(Image(filename="non_zero_fractions.png"))
-
-    for file in sorted(os.listdir()):
-        if file.startswith("weight_distribution_"):
-            display(Image(filename=file))
-
 
 def assess_overall_weight_distribution(model):
     """
