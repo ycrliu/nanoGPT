@@ -33,7 +33,7 @@ def sparsify_threshold_based(model, sparsity_level):
 
         
         # Zero out each parameter tensor entirely if it falls below the global threshold
-        for name, param in params:
+        for param in params:
             # Check if the entire parameter tensor falls below the threshold
             mask = (param.data.abs() >= threshold).float()  # 1 where tensor's magnitude is above threshold
             param.data = param.data * mask
