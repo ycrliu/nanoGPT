@@ -1,6 +1,8 @@
 import torch
 import matplotlib.pyplot as plt
 from model import GPTConfig, GPT
+from IPython.display import Image, display
+import os
 
 def sparsify_threshold_based(model, sparsity_level):
     """
@@ -60,7 +62,8 @@ def assess_sparsity_structure(model):
     plt.xticks(rotation=90)
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.title("Non-Zero Weight Fractions by Layer")
-    plt.show()
+    plt.savefig("non_zero_fractions.png")
+    plt.close()
 
     # Plot weight distributions for feedforward layers
     for name, sparsity_fraction, weights in sparsity_data:
@@ -69,5 +72,16 @@ def assess_sparsity_structure(model):
         plt.xlabel("Weight Value")
         plt.ylabel("Frequency")
         plt.title(f"Weight Distribution for Layer: {name}")
-        plt.show()
+        plt.savefig(f"weight_distribution_{name}.png")  # Save plot for each layer
+        plt.close()
+
+    # Display the non-zero fractions plot
+    display(Image(filename="non_zero_fractions.png"))
+
+    for file in sorted(os.listdir()):
+        if file.startswith("weight_distribution_"):
+            display(Image(filename=file))
+
+
+
 
