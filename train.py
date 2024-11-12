@@ -191,7 +191,7 @@ elif init_from.startswith('gpt2'):
 print("BEFORE SPARSIFICATION")
 evaluate_model(model)
 # apply sparsification, before fine-tuning
-sparsity_level = 50
+sparsity_level = 10
 sparsify_threshold_based_global(model, sparsity_level)
 
 
