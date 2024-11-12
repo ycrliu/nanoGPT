@@ -29,7 +29,7 @@ def sparsify_threshold_based(model, sparsity_level):
         all_weights = torch.cat([param.data.view(-1).abs() for param in params])
 
         # Determine the threshold for pruning based on the desired sparsity level
-        k = int(all_weights.numel() * sparsity_level / 100)
+        k = int(all_weights.numel() * (100 - sparsity_level) / 100)
 
         if k > 0:
             # `kthvalue` gets the kth smallest value, so threshold prunes `sparsity_level` amount of weights
