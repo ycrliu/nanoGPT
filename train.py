@@ -190,7 +190,7 @@ elif init_from.startswith('gpt2'):
     
 # apply sparsification, before fine-tuning
 sparsity_level = 50
-sparsify_threshold_based(model, sparsity_level)
+sparsify_threshold_based_global(model, sparsity_level)
 
 
 assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
