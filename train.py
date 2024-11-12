@@ -191,7 +191,7 @@ elif init_from.startswith('gpt2'):
 print("BEFORE SPARSIFICATION")
 evaluate_model(model)
 # apply sparsification, before fine-tuning
-sparsity_level = 10
+sparsity_level = 99
 sparsify_threshold_based_global(model, sparsity_level)
 
 
@@ -274,7 +274,7 @@ while True:
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-    always_save_checkpoint = True
+    # always_save_checkpoint = True
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
