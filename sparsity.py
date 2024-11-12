@@ -37,7 +37,7 @@ def sparsify_threshold_based(model, sparsity_level):
             
             for param in params:
                 # Check if the entire parameter tensor falls below the threshold
-                mask = (param.data.abs() > threshold).float()  # 1 where tensor's magnitude is above threshold
+                mask = param.data.abs() > threshold  # 1 where tensor's magnitude is above threshold
                 param.data *= mask
 
 
@@ -57,7 +57,7 @@ def sparsify_random_based(model, sparsity_level,):
             param_data *= mask
 
 
-def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8, file_name_append=""):
+def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-4, file_name_append=""):
 
     layer_weights = defaultdict(list)
 
