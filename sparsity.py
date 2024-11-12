@@ -42,6 +42,20 @@ def sparsify_threshold_based(model, sparsity_level):
                 param.data[param.data.abs() <= threshold] = 0
 
 
+def sparsify_threshold_based_global(model, sparsity_level, threshold=1e-5):
+    for _, param in model.named_parameters():
+        if param.dim() > 1:
+            abs_weights = param.abs()
+
+            # Calculate threshold for desired sparsity
+            k = int(param.numel() * sparsity_level / 100)
+            threshold = torch.kthvalue(abs_weights.view(-1), k).values
+
+            # Zero out weights below threshold
+            mask = abs_weights > threshold
+            param.data *= mask
+
+
 def sparsify_random_based(model, sparsity_level,):
     """
     Applies static sparsification to a given `model` by pruning its weights.
