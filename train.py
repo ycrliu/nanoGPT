@@ -188,6 +188,8 @@ elif init_from.startswith('gpt2'):
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = getattr(model.config, k)
     
+print("BEFORE SPARSIFICATION")
+evaluate_model(model)
 # apply sparsification, before fine-tuning
 sparsity_level = 95
 sparsify_threshold_based_global(model, sparsity_level)
