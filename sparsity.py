@@ -48,7 +48,7 @@ def sparsify_threshold_based_global(model, sparsity_level):
             abs_weights = param.abs()
 
             # Calculate threshold for desired sparsity
-            k = int(param.numel() * (100 - sparsity_level) / 100)
+            k = int(param.numel() * sparsity_level / 100)
             threshold = torch.kthvalue(abs_weights.view(-1), k).values
 
             # Zero out weights below threshold
@@ -119,7 +119,9 @@ def assess_overall_weight_distribution(model, tolerance=1e-3, sparsed=False, fil
         if "weight" in name:  # Filter to include only weight parameters
             weights = param.cpu().detach().numpy().flatten()
             # Apply thresholding: set weights below the tolerance to zero
-            weights[np.abs(weights) < tolerance] = 0
+
+            weights = weights[np.abs(weights) >= tolerance]
+
             all_weights.append(weights)
 
     # Flatten the list of arrays into a single array for plotting
