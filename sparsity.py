@@ -57,7 +57,7 @@ def sparsify_random_based(model, sparsity_level,):
             param_data *= mask
 
 
-def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8):
+def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8, file_name_append=""):
 
     layer_weights = defaultdict(list)
 
@@ -87,10 +87,10 @@ def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8):
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.xlabel("Layer Index")
     plt.title("Non-Zero Weight Fractions by Layer")
-    plt.savefig(f"{'after' if sparsed else 'before'}_all_layers_{layer_name}_weight_distribution.png")
+    plt.savefig(f"{file_name_append}_{'after' if sparsed else 'before'}_all_layers_{layer_name}_weight_distribution.png")
     plt.close()
 
-def assess_overall_weight_distribution(model, sparsed=False):
+def assess_overall_weight_distribution(model, sparsed=False, file_name_append=""):
     """
     Aggregates and plots the weight distribution across all layers in the model.
     """
@@ -110,5 +110,5 @@ def assess_overall_weight_distribution(model, sparsed=False):
     plt.xlabel("Weights")
     plt.ylabel("Count")
     plt.title("Overall Weight Distribution Across All Layers")
-    plt.savefig(f"{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")  # Save plot for each layer
+    plt.savefig(f"{file_name_append}_{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")  # Save plot for each layer
     plt.close()

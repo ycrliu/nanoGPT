@@ -193,6 +193,11 @@ sparsity_level = 50
 sparsify_threshold_based(model, sparsity_level)
 
 
+assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
+assess_overall_weight_distribution(model, file_name_append="BEFORE_FINETUNE")
+
+
+
 # crop down the model block size if desired, using model surgery
 if block_size < model.config.block_size:
     model.crop_block_size(block_size)
@@ -339,8 +344,8 @@ while True:
     if iter_num > max_iters:
         break
 
-assess_sparsity_structure(model)
-assess_overall_weight_distribution(model)
+assess_sparsity_structure(model, file_name_append="AFTER_FINETUNE")
+assess_overall_weight_distribution(model, file_name_append="AFTER_FINETUNE")
 
 if ddp:
     destroy_process_group()
