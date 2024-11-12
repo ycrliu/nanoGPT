@@ -5,6 +5,7 @@ import numpy as np
 from collections import defaultdict
 
 
+
 def sparsify_threshold_based(model, sparsity_level):
     """
     Applies static sparsification to a given `model` by pruning its weights.
@@ -12,6 +13,7 @@ def sparsify_threshold_based(model, sparsity_level):
     smallest magnitudes, under the assumption that smaller weights contribute less to the output.
 
     sparsity_level: percentage between 0 and 100, represents the amount of weights to be pruned.
+        In other words, (100 - sparsity_level)% is the amount that remains post-pruning.
     """
     # Group weights by layer
     layer_weights = defaultdict(list)
@@ -25,18 +27,18 @@ def sparsify_threshold_based(model, sparsity_level):
     for layer, params in layer_weights.items():
         # Collect all weights across the entire layer to compute a global threshold
         all_weights = torch.cat([param.data.view(-1).abs() for param in params])
-        
-        # Determine the threshold for pruning based on the desired sparsity level
-        sorted_weights, _ = torch.sort(all_weights.view(-1))
-        cutoff_index = int(sparsity_level / 100 * sorted_weights.numel())
-        threshold = sorted_weights[cutoff_index]
 
-        
-        # Zero out each parameter tensor entirely if it falls below the global threshold
-        for param in params:
-            # Check if the entire parameter tensor falls below the threshold
-            mask = (param.data.abs() >= threshold).float()  # 1 where tensor's magnitude is above threshold
-            param.data = param.data * mask
+        # Determine the threshold for pruning based on the desired sparsity level
+        k = int(all_weights.numel() * sparsity_level / 100)
+
+        if k > 0:
+            # `kthvalue` gets the kth smallest value, so threshold prunes `sparsity_level` amount of weights
+            threshold = torch.kthvalue(all_weights, k).values
+            
+            for param in params:
+                # Check if the entire parameter tensor falls below the threshold
+                mask = (param.data.abs() > threshold).float()  # 1 where tensor's magnitude is above threshold
+                param.data *= mask
 
 
 def sparsify_random_based(model, sparsity_level,):
