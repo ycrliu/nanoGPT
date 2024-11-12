@@ -189,7 +189,7 @@ elif init_from.startswith('gpt2'):
         model_args[k] = getattr(model.config, k)
     
 # apply sparsification, before fine-tuning
-sparsity_level = 99
+sparsity_level = 50
 sparsify_threshold_based(model, sparsity_level)
 
 

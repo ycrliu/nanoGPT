@@ -29,7 +29,7 @@ def sparsify_threshold_based(model, sparsity_level):
         all_weights = torch.cat([param.data.view(-1).abs() for param in params])
 
         # Determine the threshold for pruning based on the desired sparsity level
-        k = int(all_weights.numel() * (100 - sparsity_level) / 100)
+        k = int(all_weights.numel() * sparsity_level / 100)
 
         if k > 0:
             # `kthvalue` gets the kth smallest value, so threshold prunes `sparsity_level` amount of weights
@@ -77,7 +77,6 @@ def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8):
         sparsity_fraction = non_zero_elements / total_elements  # Fraction of weights > 0
         layer_sparsity_data[layer_name] = sparsity_fraction
 
-
     # Plot fraction of non-zero weights by layer
     layer_names = list(layer_sparsity_data.keys())
     non_zero_fractions = list(layer_sparsity_data.values())
@@ -104,7 +103,6 @@ def assess_overall_weight_distribution(model, sparsed=False):
 
     # Flatten the list of arrays into a single array for plotting
     all_weights = np.concatenate(all_weights)
-
 
     # Plot the overall weight distribution
     plt.figure(figsize=(10, 5))
