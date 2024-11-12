@@ -64,6 +64,7 @@ def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-8, file_name_app
     # Go through each parameter in the model
     for name, param in model.named_parameters():
         if "weight" in name:  # Filter to include only weight parameters
+            if len(name.split(".")) < 4: continue
             layer = name.split(".")[3]
             layer_weights[layer].append(param.cpu().detach().numpy().flatten())
 
