@@ -195,6 +195,7 @@ sparsify_threshold_based_global(model, sparsity_level)
 
 assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
 assess_overall_weight_distribution(model, file_name_append="BEFORE_FINETUNE")
+evaluate_model(model)
 
 
 
