@@ -189,7 +189,7 @@ elif init_from.startswith('gpt2'):
         model_args[k] = getattr(model.config, k)
     
 # apply sparsification, before fine-tuning
-sparsity_level = 99
+sparsity_level = 95
 sparsify_threshold_based_global(model, sparsity_level)
 
 
@@ -346,6 +346,8 @@ while True:
 
 assess_sparsity_structure(model, file_name_append="AFTER_FINETUNE")
 assess_overall_weight_distribution(model, file_name_append="AFTER_FINETUNE")
+
+evaluate_model(model)
 
 if ddp:
     destroy_process_group()

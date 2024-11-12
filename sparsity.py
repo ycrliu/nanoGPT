@@ -138,17 +138,11 @@ def assess_overall_weight_distribution(model, tolerance=1e-3, sparsed=False, fil
     plt.close()
 
 
-# def evaluate_model(model):
-#     model.eval()
-#     losses = estimate_loss(model)
-#     val_loss = losses['val']
+def evaluate_model(model):
 
-#     # Get model size
-#     total_params = sum(p.numel() for p in model.parameters())
-#     nonzero_params = sum((p != 0).sum().item() for p in model.parameters())
+    # Get model size
+    total_params = sum(p.numel() for _, p in model.named_parameters())
+    nonzero_params = sum((p > 1e-3).sum().item() for _, p in model.named_parameters())
 
-#     return {
-#         'val_loss': val_loss,
-#         'compression_ratio': nonzero_params / total_params,
-#         'model_size_mb': nonzero_params * 4 / (1024*1024)  # Assuming float32
-#     }
+    print(f"compression_ratio: {nonzero_params / total_params}")
+    print(f"model_size_mb: {nonzero_params * 4 / (1024*1024)}")
