@@ -100,6 +100,7 @@ def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-3, file_name_app
     plt.figure(figsize=(12, 6))
     plt.bar(layer_names, non_zero_fractions)
     plt.xticks(rotation=90)
+    plt.ylim(0.0, 1.0)
     plt.ylabel("Fraction of Non-Zero Weights")
     plt.xlabel("Layer Index")
     plt.title("Non-Zero Weight Fractions by Layer")
