@@ -92,7 +92,9 @@ def assess_sparsity_structure(model, sparsed=False, zero_tol=1e-3, file_name_app
     plt.savefig(f"{file_name_append}_{'after' if sparsed else 'before'}_all_layers_{layer_name}_weight_distribution.png")
     plt.close()
 
-def assess_overall_weight_distribution(model, sparsed=False, file_name_append=""):
+
+
+def assess_overall_weight_distribution(model, tolerance=1e-3, sparsed=False, file_name_append=""):
     """
     Aggregates and plots the weight distribution across all layers in the model.
     """
@@ -101,7 +103,10 @@ def assess_overall_weight_distribution(model, sparsed=False, file_name_append=""
     # Collect weights from all layers
     for name, param in model.named_parameters():
         if "weight" in name:  # Filter to include only weight parameters
-            all_weights.append(param.cpu().detach().numpy().flatten())
+            weights = param.cpu().detach().numpy().flatten()
+            # Apply thresholding: set weights below the tolerance to zero
+            weights[np.abs(weights) < tolerance] = 0
+            all_weights.append(weights)
 
     # Flatten the list of arrays into a single array for plotting
     all_weights = np.concatenate(all_weights)
@@ -111,6 +116,8 @@ def assess_overall_weight_distribution(model, sparsed=False, file_name_append=""
     plt.hist(all_weights, bins=50, range=(-0.75, 0.75))
     plt.xlabel("Weights")
     plt.ylabel("Count")
-    plt.title("Overall Weight Distribution Across All Layers")
-    plt.savefig(f"{file_name_append}_{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")  # Save plot for each layer
+    plt.title("Overall Weight Distribution Across All Layers (Threshold Applied)")
+    plt.savefig(f"{file_name_append}_{'after' if sparsed else 'before'}_overall_weight_distribution_{name}.png")
     plt.close()
+
+
