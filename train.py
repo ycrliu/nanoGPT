@@ -188,16 +188,16 @@ elif init_from.startswith('gpt2'):
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = getattr(model.config, k)
     
-print("BEFORE SPARSIFICATION")
-evaluate_model(model)
+# print("BEFORE SPARSIFICATION")
+# evaluate_model(model)
 # apply sparsification, before fine-tuning
 sparsity_level = 50
 sparsify_threshold_based_global(model, sparsity_level)
 
 
-assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
-assess_overall_weight_distribution(model, file_name_append="BEFORE_FINETUNE")
-evaluate_model(model)
+# assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
+# assess_overall_weight_distribution(model, file_name_append="BEFORE_FINETUNE")
+# evaluate_model(model)
 
 
 
@@ -348,10 +348,10 @@ while True:
     if iter_num > max_iters:
         break
 
-assess_sparsity_structure(model, file_name_append="AFTER_FINETUNE")
-assess_overall_weight_distribution(model, file_name_append="AFTER_FINETUNE")
+# assess_sparsity_structure(model, file_name_append="AFTER_FINETUNE")
+# assess_overall_weight_distribution(model, file_name_append="AFTER_FINETUNE")
 
-evaluate_model(model)
+# evaluate_model(model)
 
 if ddp:
     destroy_process_group()
