@@ -85,5 +85,24 @@ with torch.no_grad():
     with ctx:
         for k in range(num_samples):
             y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+
+            # Compute per-token entropies
+            with torch.no_grad():
+                logits, _ = model(x)  # Get logits for the original sequence
+                probabilities = F.softmax(logits, dim=-1)  # Convert logits to probabilities
+
+                # Compute entropy for each token
+                token_entropies = -(probabilities * torch.log(probabilities + 1e-9)).sum(dim=-1)  # Shape: (batch_size, seq_len)
+                entropies = token_entropies.squeeze(0)  # Remove batch dimension
+
+                # Display entropies alongside the decoded tokens
+                print("Per-token entropies:")
+                for i, token_id in enumerate(y[0].tolist()):
+                    token = decode([token_id])
+                    entropy = entropies[i].item() if i < len(entropies) else "N/A"
+                    print(f"Token: {token} | Entropy: {entropy}")
+
+
+            
             print(decode(y[0].tolist()))
             print('---------------')
