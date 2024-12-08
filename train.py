@@ -228,10 +228,9 @@ elif init_from.startswith('gpt2'):
         model_args[k] = getattr(model.config, k)
 
 # apply sparsification, before fine-tuning
-
-sparsity_level = 50
 if master_process:
     print(f"Applying sparsification with sparsity level {sparsity_level}%")
+sparsity_level = 50
 sparsify_threshold_based_global(model, sparsity_level)
 
 # crop down the model block size if desired, using model surgery
@@ -257,10 +256,6 @@ if compile:
     unoptimized_model = model
     model = torch.compile(model)  # requires PyTorch 2.0
 
-# wrap model into DDP container
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
-
 # ------------------------------ Initialize Privacy Engine ------------------------------
 privacy_engine = None
 original_model = None  # To store the reference to the original GPT model
@@ -268,6 +263,8 @@ if privacy_engine_enabled:
     if master_process:
         print("Initializing Privacy Engine with Opacus")
     privacy_engine = PrivacyEngine()
+    # Save the original model reference before wrapping
+    original_model = model
     # Attach the privacy engine to the model and optimizer
     model, optimizer, train_loader = privacy_engine.make_private(
         module=model,
@@ -276,8 +273,13 @@ if privacy_engine_enabled:
         noise_multiplier=noise_multiplier,
         max_grad_norm=max_grad_norm,
     )
-    # Access the original model
-    original_model = privacy_engine.original_model
+    # Now, 'model' is wrapped by Opacus, and 'original_model' refers to the original GPT model
+# ------------------------------------------------------------------------------
+
+# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
+# Wrap model into DDP container after attaching PrivacyEngine
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
 # ------------------------------------------------------------------------------
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -326,11 +328,13 @@ if master_process:
     print("Starting training loop")
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
-# raw_model = model.module if ddp else model  # unwrap DDP container if needed
+
+# Determine how to access the original model
 if privacy_engine_enabled:
     raw_model = original_model
 else:
     raw_model = model.module if ddp else model  # unwrap DDP container if needed
+
 running_mfu = -1.0
 
 # Initialize iterators
@@ -409,9 +413,17 @@ while True:
         # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
         lossf = loss.item() * gradient_accumulation_steps
         if local_iter_num >= 5:  # let the training loop settle a bit
-            mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
-            running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
+            try:
+                mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
+                running_mfu = mfu if running_mfu == -1.0 else 0.9 * running_mfu + 0.1 * mfu
+            except AttributeError:
+                # If 'estimate_mfu' is not available, skip MFU logging
+                mfu = None
+                running_mfu = -1.0
+            if mfu is not None:
+                print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
+            else:
+                print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
     iter_num += 1
     local_iter_num += 1
 
