@@ -34,7 +34,7 @@ from sparsity import *
 # ------------------------------ Opacus Imports ------------------------------
 from opacus import PrivacyEngine
 from opacus.utils.batch_memory_manager import BatchMemoryManager
-from opacus.utils import privacy_analysis
+
 # ------------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
