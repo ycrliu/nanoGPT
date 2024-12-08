@@ -77,7 +77,7 @@ backend = 'nccl'  # 'nccl', 'gloo', etc.
 # system
 device = 'cuda'  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'float32'  # Use 'float32' for compatibility with Opacus
-compile = True  # use PyTorch 2.0 to compile the model to be faster
+compile_model = True  # use PyTorch 2.0 to compile the model to be faster
 # DP settings
 privacy_engine_enabled = True
 noise_multiplier = 1.0    # Adjust based on desired privacy level
@@ -115,6 +115,7 @@ else:
     master_process = True
     seed_offset = 0
     ddp_world_size = 1
+
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
 if master_process:
     print(f"tokens per iteration will be: {tokens_per_iter:,}")
@@ -125,6 +126,19 @@ torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
 # note: float32 data type does not require a GradScaler
 ctx = nullcontext()
+
+# ------------------------------ Gradient Accumulation Adjustment ------------------------------
+# Adjust gradient accumulation steps and DataLoader settings based on privacy settings
+if privacy_engine_enabled:
+    # Set gradient accumulation steps to 1 for Opacus compatibility
+    gradient_accumulation_steps = 1
+    # Disable model compilation when using Opacus
+    compile_model = False
+    # Optionally, adjust other settings if necessary
+else:
+    # Retain original gradient accumulation steps
+    pass
+# ------------------------------------------------------------------------------------------
 
 # ------------------------------ Data Loading with DataLoader ------------------------------
 class GPTDataset(Dataset):
@@ -150,7 +164,7 @@ train_loader = DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,
-    num_workers=4,  # Adjust based on your system
+    num_workers=2,  # Reduced from 4 to 2 based on warning
     pin_memory=True,
     drop_last=True  # Ensure all batches are the same size
 )
@@ -159,9 +173,9 @@ val_loader = DataLoader(
     val_dataset,
     batch_size=batch_size,
     shuffle=False,
-    num_workers=4,  # Adjust based on your system
+    num_workers=2,  # Reduced from 4 to 2 based on warning
     pin_memory=True,
-    drop_last=True
+    drop_last=True  # Ensure all batches are the same size
 )
 # ------------------------------------------------------------------------------
 
@@ -250,11 +264,10 @@ if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None  # free up memory
 
-# compile the model
-if compile:
+# Compile the model only if Privacy Engine is not enabled
+if compile_model:
     if master_process:
-        print("compiling the model... (takes a ~minute)")
-    unoptimized_model = model
+        print("Compiling the model... (takes a ~minute)")
     model = torch.compile(model)  # requires PyTorch 2.0
 
 # ------------------------------ Initialize Privacy Engine ------------------------------
@@ -278,7 +291,7 @@ if privacy_engine_enabled:
 # ------------------------------------------------------------------------------
 
 # ------------------------------ Distributed Data Parallel (DDP) ------------------------------
-# Wrap model into DDP container after attaching PrivacyEngine
+# Wrap model into DDP container after attaching Privacy Engine
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 # ------------------------------------------------------------------------------
