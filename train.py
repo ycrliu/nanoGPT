@@ -29,6 +29,7 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 from sparsity import *
+from dp import *
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -226,6 +227,13 @@ if compile:
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
+# Register gradient hooks to add noise to specific layers
+noise_std = 1e-3  # Standard deviation of the Gaussian noise
+for name, param in model.named_parameters():
+    if 'transformer.wte' in name or 'transformer.ln_f' in name:  # Target embeddings and final layer
+        param.register_hook(lambda grad: grad + torch.normal(0, noise_std, grad.size()).to(grad.device))
+
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
 def estimate_loss():
@@ -260,6 +268,8 @@ def get_lr(it):
 if wandb_log and master_process:
     import wandb
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
+
+
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
@@ -319,6 +329,11 @@ while True:
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
+        for name, param in model.named_parameters():
+            if 'transformer.wte' in name or 'transformer.ln_f' in name:  # Add noise selectively
+                add_noise_to_gradients(param, noise_std=noise_std)
+
+
     # clip the gradient
     if grad_clip != 0.0:
         scaler.unscale_(optimizer)
