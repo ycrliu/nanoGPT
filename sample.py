@@ -117,18 +117,31 @@ def sample_with_entropy(model, x, max_new_tokens, temperature, top_k):
 # Generate samples
 with torch.no_grad():
     with ctx:
+        matches = 0
         for i in range(num_samples):
             generated, entropies = sample_with_entropy(model, x, max_new_tokens, temperature, top_k)
             tokens = generated[0].tolist()
             print(f"Sample {i + 1}:")
             print("Generated Text and Per-token Entropies:")
+            found = False
+            canaries = {
+                "CANARY_STRING_ABC123": 2,
+                "CANARY_STRING_XYZ789": 3,
+                "CANARY_STRING_QWERTY": 2,
+                "CANARY_STRING_12345_ABC": 1,
+                "CANARY_STRING_SECRET": 2
+            }
+
             for idx, token_id in enumerate(tokens):
                 token = decode([token_id])
+                if token in canaries:
+                    matches += 1
                 entropy = entropies[idx] if idx < len(entropies) else "N/A"
                 print(f"Token: {token} | Entropy: {entropy:.4f}" if isinstance(entropy, float) else f"Token: {token} | Entropy: {entropy}")
             print("Generated Text:")
             print(decode(tokens))
             print('-' * 40)
+        print(f"NUMBER OF MATCHES: {matches}")
 
 def entropy_to_color(entropy, min_ent=0.0, max_ent=1.0):
     # Clamp entropy to range
@@ -155,6 +168,6 @@ for token, ent in zip(tokens, entropies):
 html_output.append("</p></body></html>")
 html_str = "".join(html_output)
 
-# Write to a file
-with open("entropy_colored_output.html", "w", encoding="utf-8") as f:
-    f.write(html_str)
+# # Write to a file
+# with open("entropy_colored_output.html", "w", encoding="utf-8") as f:
+#     f.write(html_str)
