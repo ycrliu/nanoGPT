@@ -130,3 +130,15 @@ with torch.no_grad():
             print(decode(tokens))
             print('-' * 40)
 
+def entropy_to_color(entropy, min_ent=0.0, max_ent=1.0):
+    # Clamp entropy to range
+    e = max(min_ent, min(entropy, max_ent))
+    # Calculate a ratio
+    ratio = (e - min_ent) / (max_ent - min_ent)
+    # ratio=0 -> green (#00FF00), ratio=1 -> red (#FF0000)
+    # We can interpolate in RGB space:
+    # green = (0, 255, 0), red = (255, 0, 0)
+    r = int(ratio * 255)
+    g = int((1 - ratio) * 255)
+    b = 0
+    return f"rgb({r},{g},{b})"

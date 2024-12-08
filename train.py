@@ -30,6 +30,9 @@ from torch.distributed import init_process_group, destroy_process_group
 from model import GPTConfig, GPT
 from sparsity import *
 
+from opacus import PrivacyEngine
+
+
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
@@ -112,28 +115,61 @@ device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.aut
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
 
-# poor man's data loader
 data_dir = os.path.join('data', dataset)
-def get_batch(split):
-    # We recreate np.memmap every batch to avoid a memory leak, as per
-    # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    if split == 'train':
-        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
-    else:
-        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
-    y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
-    if device_type == 'cuda':
-        # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
-    else:
-        x, y = x.to(device), y.to(device)
-    return x, y
 
-# init these up here, can override if init_from='resume' (i.e. from a checkpoint)
-iter_num = 0
-best_val_loss = 1e9
+# def get_batch(split):
+#     # We recreate np.memmap every batch to avoid a memory leak, as per
+#     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
+#     if split == 'train':
+#         data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+#     else:
+#         data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+#     ix = torch.randint(len(data) - block_size, (batch_size,))
+#     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
+#     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
+#     if device_type == 'cuda':
+#         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+#         x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(device, non_blocking=True)
+#     else:
+#         x, y = x.to(device), y.to(device)
+#     return x, y
+
+class ShakespeareDataset(torch.utils.data.Dataset):
+    def __init__(self, data_file, block_size):
+        self.block_size = block_size
+        # load all data into memory once
+        data = np.fromfile(data_file, dtype=np.uint16)
+        self.data = torch.from_numpy(data.astype(np.int64))
+
+    def __len__(self):
+        # number of examples = length of data // block_size
+        return len(self.data) // self.block_size - 1
+
+    def __getitem__(self, idx):
+        i = idx * self.block_size
+        x = self.data[i:i+self.block_size]
+        y = self.data[i+1:i+1+self.block_size]
+        return x, y
+
+train_data_file = os.path.join(data_dir, 'train.bin')
+val_data_file = os.path.join(data_dir, 'val.bin')
+
+train_dataset = ShakespeareDataset(train_data_file, block_size)
+val_dataset = ShakespeareDataset(val_data_file, block_size)
+
+train_loader = torch.utils.data.DataLoader(
+    train_dataset,
+    batch_size=batch_size,
+    shuffle=True,
+    pin_memory=(device_type=='cuda')
+)
+
+val_loader = torch.utils.data.DataLoader(
+    val_dataset,
+    batch_size=batch_size,
+    shuffle=False,
+    pin_memory=(device_type=='cuda')
+)
 
 # attempt to derive vocab_size from the dataset
 meta_path = os.path.join(data_dir, 'meta.pkl')
@@ -143,6 +179,11 @@ if os.path.exists(meta_path):
         meta = pickle.load(f)
     meta_vocab_size = meta['vocab_size']
     print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+
+
+# init these up here, can override if init_from='resume' (i.e. from a checkpoint)
+iter_num = 0
+best_val_loss = 1e9
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
@@ -188,16 +229,9 @@ elif init_from.startswith('gpt2'):
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = getattr(model.config, k)
     
-# print("BEFORE SPARSIFICATION")
-# evaluate_model(model)
 # apply sparsification, before fine-tuning
 sparsity_level = 50
 sparsify_threshold_based_global(model, sparsity_level)
-
-
-# assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
-# assess_overall_weight_distribution(model, file_name_append="BEFORE_FINETUNE")
-# evaluate_model(model)
 
 
 
@@ -226,19 +260,41 @@ if compile:
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
+# integrate Differential Privacy
+noise_multiplier = 1.0  # Adjust as needed
+max_grad_norm = 1.0
+
+privacy_engine = PrivacyEngine()
+model, optimizer, train_loader = privacy_engine.make_private(
+    module=model,
+    optimizer=optimizer,
+    data_loader=train_loader,
+    noise_multiplier=noise_multiplier,
+    max_grad_norm=max_grad_norm,
+)
+
 # helps estimate an arbitrarily accurate loss over either split using many batches
+
 @torch.no_grad()
 def estimate_loss():
     out = {}
     model.eval()
-    for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
-        for k in range(eval_iters):
-            X, Y = get_batch(split)
+
+    def eval_split(loader):
+        losses = []
+        count = 0
+        for X, Y in loader:
+            X, Y = X.to(device), Y.to(device)
             with ctx:
                 logits, loss = model(X, Y)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
+            losses.append(loss.item())
+            count += 1
+            if count >= eval_iters:
+                break
+        return float(np.mean(losses))
+
+    out['train'] = eval_split(train_loader)
+    out['val'] = eval_split(val_loader)
     model.train()
     return out
 
@@ -262,20 +318,27 @@ if wandb_log and master_process:
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
-X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
-local_iter_num = 0 # number of iterations in the lifetime of this process
-raw_model = model.module if ddp else model # unwrap DDP container if needed
+local_iter_num = 0
+raw_model = model.module if ddp else model
 running_mfu = -1.0
-while True:
 
-    # determine and set the learning rate for this iteration
+while True:
+    # learning rate decay
+    def get_lr(it):
+        if it < warmup_iters:
+            return learning_rate * it / warmup_iters
+        if it > lr_decay_iters:
+            return min_lr
+        decay_ratio = (it - warmup_iters) / (lr_decay_iters - warmup_iters)
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+        return min_lr + coeff * (learning_rate - min_lr)
+
     lr = get_lr(iter_num) if decay_lr else learning_rate
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
-    # always_save_checkpoint = True
-    # evaluate the loss on train/val sets and write checkpoints
+    # Evaluate and save checkpoints
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
@@ -285,7 +348,7 @@ while True:
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
-                "mfu": running_mfu*100, # convert to percentage
+                "mfu": running_mfu*100,
             })
         if losses['val'] < best_val_loss or always_save_checkpoint:
             best_val_loss = losses['val']
@@ -300,58 +363,48 @@ while True:
                 }
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
     if iter_num == 0 and eval_only:
         break
 
-    # forward backward update, with optional gradient accumulation to simulate larger batch size
-    # and using the GradScaler if data type is float16
-    for micro_step in range(gradient_accumulation_steps):
-        if ddp:
-            # in DDP training we only need to sync gradients at the last micro step.
-            # the official way to do this is with model.no_sync() context manager, but
-            # I really dislike that this bloats the code and forces us to repeat code
-            # looking at the source of that context manager, it just toggles this variable
-            model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
+    # Training step
+    # We'll do a single pass over train_loader for one iteration.
+    # One "iteration" here might mean one step. The original code had infinite loop and break conditions.
+    # We'll break when iter_num > max_iters.
+    for X, Y in train_loader:
+        X, Y = X.to(device), Y.to(device)
+        optimizer.zero_grad(set_to_none=True)
         with ctx:
             logits, loss = model(X, Y)
-            loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
-        # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = get_batch('train')
-        # backward pass, with gradient scaling if training in fp16
+
         scaler.scale(loss).backward()
-    # clip the gradient
-    if grad_clip != 0.0:
-        scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
-    # step the optimizer and scaler if training in fp16
-    scaler.step(optimizer)
-    scaler.update()
-    # flush the gradients as soon as we can, no need for this memory anymore
-    optimizer.zero_grad(set_to_none=True)
+        scaler.step(optimizer)
+        scaler.update()
 
-    # timing and logging
-    t1 = time.time()
-    dt = t1 - t0
-    t0 = t1
-    if iter_num % log_interval == 0 and master_process:
-        # get loss as float. note: this is a CPU-GPU sync point
-        # scale up to undo the division above, approximating the true total loss (exact would have been a sum)
-        lossf = loss.item() * gradient_accumulation_steps
-        if local_iter_num >= 5: # let the training loop settle a bit
-            mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
-            running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
-        print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
-    iter_num += 1
-    local_iter_num += 1
+        # logging
+        t1 = time.time()
+        dt = t1 - t0
+        t0 = t1
+        if iter_num % log_interval == 0 and master_process:
+            lossf = loss.item()
+            if local_iter_num >= 5:
+                mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
+                running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
+            print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
 
-    # termination conditions
+        iter_num += 1
+        local_iter_num += 1
+
+        # print DP epsilon after each epoch (roughly)
+        if master_process and iter_num % eval_interval == 0:
+            epsilon = privacy_engine.get_epsilon(delta=1e-5)
+            print(f"After {iter_num} steps, DP ε = {epsilon:.2f}")
+
+        if iter_num > max_iters:
+            break
+
     if iter_num > max_iters:
         break
-
-# assess_sparsity_structure(model, file_name_append="AFTER_FINETUNE")
-# assess_overall_weight_distribution(model, file_name_append="AFTER_FINETUNE")
-
-# evaluate_model(model)
 
 if ddp:
     destroy_process_group()
