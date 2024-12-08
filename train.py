@@ -10,10 +10,10 @@ from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
 
-# FORCE dtype to float32 for DP stability
+# Force float32 for DP stability
 dtype = 'float32'
 
-# Basic defaults (override with configurator, but we will re-override dtype)
+# Basic defaults
 out_dir = 'out'
 eval_interval = 50
 log_interval = 1
@@ -45,13 +45,13 @@ lr_decay_iters = 500
 min_lr = 6e-5
 backend = 'nccl'
 device = 'cuda'
-compile = False # MUST be False for DP
+compile = False
 
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int,float,bool,str))]
 exec(open('configurator.py').read())
 config = {k: globals()[k] for k in config_keys}
 
-# FORCE dtype to float32 again, ignoring user overrides
+# Force dtype
 dtype = 'float32'
 
 ddp = int(os.environ.get('RANK', -1)) != -1
@@ -77,7 +77,7 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 device_type = 'cuda' if 'cuda' in device else 'cpu'
-ctx = nullcontext() # no autocast
+ctx = nullcontext()
 
 data_dir = os.path.join('data', dataset)
 
@@ -88,7 +88,6 @@ class FixedDataset(torch.utils.data.Dataset):
         data = np.fromfile(data_file, dtype=np.uint16)
         data = torch.from_numpy(data.astype(np.int64))
 
-        # Trim so (#seq) divisible by batch_size
         length_in_seq = (len(data)-1)//block_size
         full_batches = (length_in_seq // batch_size)*batch_size
         final_length = full_batches*block_size+1
@@ -153,7 +152,7 @@ if block_size < model.config.block_size:
 
 model.to(device, dtype=torch.float32)
 
-# Single param group (no fused) optimizer
+# Simple optimizer
 params = [p for p in model.parameters() if p.requires_grad]
 optimizer = torch.optim.AdamW(params, lr=learning_rate, betas=(beta1,beta2), weight_decay=weight_decay)
 
@@ -163,15 +162,12 @@ noise_multiplier = 1.0
 max_grad_norm = 1.0
 
 privacy_engine = PrivacyEngine()
-
-# Try vectorized=False if default fails
 model, optimizer, train_loader = privacy_engine.make_private(
     module=model,
     optimizer=optimizer,
     data_loader=train_loader,
     noise_multiplier=noise_multiplier,
-    max_grad_norm=max_grad_norm,
-    vectorized=False
+    max_grad_norm=max_grad_norm
 )
 
 @torch.no_grad()
@@ -181,17 +177,16 @@ def estimate_loss():
 
     def eval_split(loader):
         losses = []
+        it = iter(loader)
         for _ in range(eval_iters):
             try:
-                X, Y = next(iter(loader))
+                X, Y = next(it)
             except StopIteration:
                 break
             X, Y = X.to(device), Y.to(device)
             logits, loss = model(X, Y)
             losses.append(loss.item())
-        if len(losses)==0:
-            return float('inf')
-        return float(np.mean(losses))
+        return float(np.mean(losses)) if losses else float('inf')
 
     out['train'] = eval_split(train_loader)
     out['val'] = eval_split(val_loader)
@@ -211,6 +206,9 @@ def get_lr(it):
     decay_ratio = (it - warmup_iters)/(lr_decay_iters - warmup_iters)
     coeff = 0.5*(1.0+math.cos(math.pi*decay_ratio))
     return min_lr+coeff*(learning_rate - min_lr)
+
+if ddp:
+    model = DDP(model, device_ids=[int(device.split(':')[-1])])
 
 while True:
     lr = get_lr(iter_num) if decay_lr else learning_rate
@@ -242,8 +240,9 @@ while True:
         optimizer.zero_grad(set_to_none=True)
         logits, loss = model(X,Y)
         loss.backward()
-        # DO NOT CLIP HERE. Opacus does its own clipping.
-        # torch.nn.utils.clip_grad_norm_(model.parameters(),grad_clip) # remove this line
+
+        # Do not do manual clipping, Opacus handles it.
+        # optimizer already is DP-optimizer
 
         optimizer.step()
 
