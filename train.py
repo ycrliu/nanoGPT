@@ -51,7 +51,7 @@ wandb_project = 'owt'
 wandb_run_name = 'gpt2'  # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
-gradient_accumulation_steps = 5 * 8  # used to simulate larger batch sizes
+gradient_accumulation_steps = 2  # Reduced from 40 to 2
 batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
@@ -77,7 +77,7 @@ backend = 'nccl'  # 'nccl', 'gloo', etc.
 # system
 device = 'cuda'  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'float32'  # Use 'float32' for compatibility with Opacus
-compile = True  # use PyTorch 2.0 to compile the model to be faster
+compile = False  # Disabled torch.compile
 # DP settings
 privacy_engine_enabled = True
 noise_multiplier = 1.0    # Adjust based on desired privacy level
@@ -227,14 +227,17 @@ elif init_from.startswith('gpt2'):
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = getattr(model.config, k)
 
-# apply sparsification, before fine-tuning
-
+# Apply sparsification, before fine-tuning
 sparsity_level = 50
 if master_process:
     print(f"Applying sparsification with sparsity level {sparsity_level}%")
 sparsify_threshold_based_global(model, sparsity_level)
 
-# crop down the model block size if desired, using model surgery
+# Ensure all parameters are trainable
+for param in model.parameters():
+    param.requires_grad = True
+
+# Crop down the model block size if desired, using model surgery
 if block_size < model.config.block_size:
     model.crop_block_size(block_size)
     model_args['block_size'] = block_size  # so that the checkpoint will have the right value
@@ -250,23 +253,21 @@ if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None  # free up memory
 
-# compile the model
-if compile:
-    if master_process:
-        print("compiling the model... (takes a ~minute)")
-    unoptimized_model = model
-    model = torch.compile(model)  # requires PyTorch 2.0
-
 # ------------------------------ Initialize Privacy Engine ------------------------------
 privacy_engine = None
-original_model = None  # To store the reference to the original GPT model
+original_model = model  # Reference to the original GPT model before wrapping
 if privacy_engine_enabled:
     if master_process:
         print("Initializing Privacy Engine with Opacus")
     privacy_engine = PrivacyEngine()
-    # Save the original model reference before wrapping
-    original_model = model
-    # Attach the privacy engine to the model and optimizer
+    
+# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
+# Wrap model into DDP container before attaching PrivacyEngine
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
+
+# Attach the privacy engine to the model and optimizer
+if privacy_engine_enabled:
     model, optimizer, train_loader = privacy_engine.make_private(
         module=model,
         optimizer=optimizer,
@@ -274,13 +275,6 @@ if privacy_engine_enabled:
         noise_multiplier=noise_multiplier,
         max_grad_norm=max_grad_norm,
     )
-    # Now, 'model' is wrapped by Opacus, and 'original_model' refers to the original GPT model
-# ------------------------------------------------------------------------------
-
-# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
-# Wrap model into DDP container after attaching PrivacyEngine
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
 # ------------------------------------------------------------------------------
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -378,7 +372,6 @@ while True:
         break
 
     # Forward backward update, with optional gradient accumulation to simulate larger batch size
-    # and using the GradScaler if training in fp16
     try:
         X, Y = next(train_loader_iter)
     except StopIteration:
