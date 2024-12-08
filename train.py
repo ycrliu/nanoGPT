@@ -74,6 +74,8 @@ backend = 'nccl' # 'nccl', 'gloo', etc.
 device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
+do_dp = False # do differential privacy?
+
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
 exec(open('configurator.py').read()) # overrides from command line or config file
@@ -192,7 +194,7 @@ elif init_from.startswith('gpt2'):
 # print("BEFORE SPARSIFICATION")
 # evaluate_model(model)
 # apply sparsification, before fine-tuning
-sparsity_level = 90
+sparsity_level = 50
 sparsity_masks = sparsify_threshold_based_global(model, sparsity_level)
 
 
@@ -230,10 +232,11 @@ if ddp:
 # Register gradient hooks to add noise to specific layers
 noise_std = 1e-3  # Noise standard deviation
 
-for name, param in model.named_parameters():
-    if name in sparsity_masks:
-        mask = sparsity_masks[name]  # Retrieve the corresponding mask
-        param.register_hook(lambda grad: add_noise_to_gradients(param, noise_std=noise_std, mask=mask))
+if do_dp:
+    for name, param in model.named_parameters():
+        if name in sparsity_masks:
+            mask = sparsity_masks[name]  # Retrieve the corresponding mask
+            param.register_hook(lambda grad: add_noise_to_gradients(param, noise_std=noise_std, mask=mask))
 
 
 
@@ -333,10 +336,11 @@ while True:
         # backward pass, with gradient scaling if training in fp16
 
         scaler.scale(loss).backward()
-        for name, param in model.named_parameters():
-            if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
-                mask = sparsity_masks[name]
-                add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
+        if do_dp:
+            for name, param in model.named_parameters():
+                if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
+                    mask = sparsity_masks[name]
+                    add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
 
 
     # clip the gradient
