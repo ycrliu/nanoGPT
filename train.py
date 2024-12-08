@@ -10,16 +10,17 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
 from model import GPTConfig, GPT
-from sparsity import *  # Assuming you still need this
+from sparsity import *  # Assuming you need this
 
-# Default config
+# -----------------------------------------------------------------------------
+# Default configuration
 out_dir = 'out'
 eval_interval = 2000
 log_interval = 1
 eval_iters = 200
 eval_only = False
 always_save_checkpoint = True
-init_from = 'scratch' 
+init_from = 'scratch'
 wandb_log = False
 wandb_project = 'owt'
 wandb_run_name = 'gpt2'
@@ -44,12 +45,15 @@ lr_decay_iters = 600000
 min_lr = 6e-5
 backend = 'nccl'
 device = 'cuda'
-dtype = 'float32' # full precision for DP
-compile = False   # Disable compile to avoid hooks issues
-
+dtype = 'float32'  # We'll finalize to float32 even if overridden
+compile = False
+# -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
-exec(open('configurator.py').read())
+exec(open('configurator.py').read()) # may override some settings
 config = {k: globals()[k] for k in config_keys}
+
+# Force dtype to float32 for DP stability
+dtype = 'float32'
 
 ddp = int(os.environ.get('RANK', -1)) != -1
 if ddp:
@@ -67,10 +71,9 @@ else:
     ddp_world_size = 1
 
 tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-print(f"tokens per iteration will be: {tokens_per_iter:,}")
-
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
+
 torch.manual_seed(1337 + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -79,11 +82,19 @@ ctx = nullcontext()  # no autocast
 
 data_dir = os.path.join('data', dataset)
 
-class ShakespeareDataset(torch.utils.data.Dataset):
-    def __init__(self, data_file, block_size):
+class UniformBatchDataset(torch.utils.data.Dataset):
+    def __init__(self, data_file, block_size, batch_size):
         self.block_size = block_size
+        self.batch_size = batch_size
         data = np.fromfile(data_file, dtype=np.uint16)
-        self.data = torch.from_numpy(data.astype(np.int64))
+        data = torch.from_numpy(data.astype(np.int64))
+
+        # Trim data so that (len(data)-1)//block_size is divisible by batch_size
+        length_in_seq = (len(data) - 1) // block_size
+        # number of full batches
+        full_batches = (length_in_seq // batch_size) * batch_size
+        final_length = full_batches * block_size + 1
+        self.data = data[:final_length]
 
     def __len__(self):
         return (len(self.data) - 1) // self.block_size
@@ -97,24 +108,21 @@ class ShakespeareDataset(torch.utils.data.Dataset):
 train_data_file = os.path.join(data_dir, 'train.bin')
 val_data_file = os.path.join(data_dir, 'val.bin')
 
-train_dataset = ShakespeareDataset(train_data_file, block_size)
-val_dataset = ShakespeareDataset(val_data_file, block_size)
+train_dataset = UniformBatchDataset(train_data_file, block_size, batch_size)
+val_dataset = UniformBatchDataset(val_data_file, block_size, batch_size)
 
-# IMPORTANT: Add drop_last=True to ensure all batches have the same size
 train_loader = torch.utils.data.DataLoader(
     train_dataset,
     batch_size=batch_size,
     shuffle=True,
-    pin_memory=(device_type=='cuda'),
-    drop_last=True
+    pin_memory=(device_type=='cuda')
 )
 
 val_loader = torch.utils.data.DataLoader(
     val_dataset,
     batch_size=batch_size,
     shuffle=False,
-    pin_memory=(device_type=='cuda'),
-    drop_last=True
+    pin_memory=(device_type=='cuda')
 )
 
 meta_path = os.path.join(data_dir, 'meta.pkl')
@@ -123,7 +131,8 @@ if os.path.exists(meta_path):
     with open(meta_path, 'rb') as f:
         meta = pickle.load(f)
     meta_vocab_size = meta['vocab_size']
-    print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+    if master_process:
+        print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
 
 iter_num = 0
 best_val_loss = 1e9
@@ -131,12 +140,14 @@ best_val_loss = 1e9
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout)
 if init_from == 'scratch':
-    print("Initializing a new model from scratch")
+    if master_process:
+        print("Initializing a new model from scratch")
     model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
 elif init_from == 'resume':
-    print(f"Resuming training from {out_dir}")
+    if master_process:
+        print(f"Resuming training from {out_dir}")
     ckpt_path = os.path.join(out_dir, 'ckpt.pt')
     checkpoint = torch.load(ckpt_path, map_location=device)
     checkpoint_model_args = checkpoint['model_args']
@@ -153,7 +164,8 @@ elif init_from == 'resume':
     iter_num = checkpoint['iter_num']
     best_val_loss = checkpoint['best_val_loss']
 elif init_from.startswith('gpt2'):
-    print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
+    if master_process:
+        print(f"Initializing from OpenAI GPT-2 weights: {init_from}")
     override_args = dict(dropout=dropout)
     model = GPT.from_pretrained(init_from, override_args)
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
@@ -169,13 +181,18 @@ if block_size < model.config.block_size:
 model.to(device, dtype=torch.float32)
 
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
+# Force no fused if it causes issues:
+for param_group in optimizer.param_groups:
+    param_group.pop('fused', None)
+
 if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None
 
-# DO NOT compile the model, as DP hooks may interfere
+# Do not use torch.compile() for now
 # if compile:
-#     print("compiling the model... (takes a ~minute)")
+#     if master_process:
+#         print("compiling the model...")
 #     model = torch.compile(model)
 
 if ddp:
@@ -193,6 +210,7 @@ model, optimizer, train_loader = privacy_engine.make_private(
     data_loader=train_loader,
     noise_multiplier=noise_multiplier,
     max_grad_norm=max_grad_norm,
+    # secure_mode=False by default
 )
 
 @torch.no_grad()
@@ -262,7 +280,8 @@ while True:
                     'best_val_loss': best_val_loss,
                     'config': config,
                 }
-                print(f"saving checkpoint to {out_dir}")
+                if master_process:
+                    print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
 
     if iter_num == 0 and eval_only:
@@ -272,7 +291,6 @@ while True:
         X, Y = X.to(device), Y.to(device)
         optimizer.zero_grad(set_to_none=True)
         logits, loss = model(X, Y)
-
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
