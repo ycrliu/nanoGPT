@@ -231,9 +231,10 @@ elif init_from.startswith('gpt2'):
         model_args[k] = getattr(model.config, k)
 
 # apply sparsification, before fine-tuning
+sparsity_level = 50
 if master_process:
     print(f"Applying sparsification with sparsity level {sparsity_level}%")
-sparsity_level = 50
+
 sparsify_threshold_based_global(model, sparsity_level)
 
 # crop down the model block size if desired, using model surgery
