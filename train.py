@@ -249,6 +249,10 @@ if block_size < model.config.block_size:
     model_args['block_size'] = block_size  # so that the checkpoint will have the right value
 model.to(device)
 
+# ensure all parameters require gradients
+for param in model.parameters():
+    param.requires_grad = True
+
 # initialize a GradScaler. If enabled=False scaler is a no-op
 # Since we're using float32, no need for GradScaler
 scaler = None  # scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
@@ -259,12 +263,6 @@ if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None  # free up memory
 
-# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
-# Wrap model into DDP container before attaching Privacy Engine
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
-# ------------------------------------------------------------------------------
-
 # ------------------------------ Initialize Privacy Engine ------------------------------
 privacy_engine = None
 original_model = None  # To store the reference to the original GPT model
@@ -272,8 +270,6 @@ if privacy_engine_enabled:
     if master_process:
         print("Initializing Privacy Engine with Opacus")
     privacy_engine = PrivacyEngine()
-    # Save the original model reference before wrapping
-    original_model = model.module if ddp else model
     # Attach the privacy engine to the model and optimizer
     model, optimizer, train_loader = privacy_engine.make_private(
         module=model,
@@ -282,7 +278,15 @@ if privacy_engine_enabled:
         noise_multiplier=noise_multiplier,
         max_grad_norm=max_grad_norm,
     )
-    # Now, 'model' is wrapped by Opacus, and 'original_model' refers to the original GPT model
+    # Now, 'model' is wrapped by Opacus
+    # Save the original model reference before wrapping with DDP
+    original_model = model.module if ddp else model
+# ------------------------------------------------------------------------------
+
+# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
+# Wrap model into DDP container AFTER attaching Privacy Engine
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
 # ------------------------------------------------------------------------------
 
 # Compile the model only if Privacy Engine is not enabled
@@ -389,9 +393,15 @@ while True:
     # and using the GradScaler if training in fp16
     try:
         X, Y = next(train_loader_iter)
+        # Debug: Check batch size
+        if X.size(0) != batch_size:
+            print(f"Warning: Expected batch size {batch_size}, but got {X.size(0)}")
     except StopIteration:
         train_loader_iter = iter(train_loader)
         X, Y = next(train_loader_iter)
+        # Debug: Check batch size
+        if X.size(0) != batch_size:
+            print(f"Warning: Expected batch size {batch_size}, but got {X.size(0)}")
 
     X, Y = X.to(device), Y.to(device)
 
