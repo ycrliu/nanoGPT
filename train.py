@@ -90,43 +90,6 @@ exec(open('configurator.py').read())  # overrides from command line or config fi
 config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
 
-# ------------------------------ Opacus Configuration ------------------------------
-# Note: Opacus requires a DataLoader with shuffle=True and without drop_last=True
-# We'll configure it accordingly below.
-# ------------------------------------------------------------------------------
-
-# various inits, derived attributes, I/O setup
-ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
-if ddp:
-    init_process_group(backend=backend)
-    ddp_rank = int(os.environ['RANK'])
-    ddp_local_rank = int(os.environ['LOCAL_RANK'])
-    ddp_world_size = int(os.environ['WORLD_SIZE'])
-    device = f'cuda:{ddp_local_rank}'
-    torch.cuda.set_device(device)
-    master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
-    seed_offset = ddp_rank  # each process gets a different seed
-    # world_size number of processes will be training simultaneously, so we can scale
-    # down the desired gradient accumulation iterations per process proportionally
-    assert gradient_accumulation_steps % ddp_world_size == 0
-    gradient_accumulation_steps //= ddp_world_size
-else:
-    # if not ddp, we are running on a single gpu, and one process
-    master_process = True
-    seed_offset = 0
-    ddp_world_size = 1
-
-tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
-if master_process:
-    print(f"tokens per iteration will be: {tokens_per_iter:,}")
-    os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1337 + seed_offset)
-torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
-device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
-# note: float32 data type does not require a GradScaler
-ctx = nullcontext()
-
 # ------------------------------ Gradient Accumulation Adjustment ------------------------------
 # Adjust gradient accumulation steps and DataLoader settings based on privacy settings
 if privacy_engine_enabled:
@@ -178,6 +141,38 @@ val_loader = DataLoader(
     drop_last=True  # Ensure all batches are the same size
 )
 # ------------------------------------------------------------------------------
+
+# various inits, derived attributes, I/O setup
+ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
+if ddp:
+    init_process_group(backend=backend)
+    ddp_rank = int(os.environ['RANK'])
+    ddp_local_rank = int(os.environ['LOCAL_RANK'])
+    ddp_world_size = int(os.environ['WORLD_SIZE'])
+    device = f'cuda:{ddp_local_rank}'
+    torch.cuda.set_device(device)
+    master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
+    seed_offset = ddp_rank  # each process gets a different seed
+    # world_size number of processes will be training simultaneously, so we can scale
+    # down the desired gradient accumulation iterations per process proportionally
+    assert gradient_accumulation_steps % ddp_world_size == 0, "gradient_accumulation_steps must be divisible by ddp_world_size"
+    gradient_accumulation_steps //= ddp_world_size
+else:
+    # if not ddp, we are running on a single gpu, and one process
+    master_process = True
+    seed_offset = 0
+    ddp_world_size = 1
+
+tokens_per_iter = gradient_accumulation_steps * ddp_world_size * batch_size * block_size
+if master_process:
+    print(f"tokens per iteration will be: {tokens_per_iter:,}")
+    os.makedirs(out_dir, exist_ok=True)
+torch.manual_seed(1337 + seed_offset)
+torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
+# note: float32 data type does not require a GradScaler
+ctx = nullcontext()
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
@@ -264,11 +259,11 @@ if init_from == 'resume':
     optimizer.load_state_dict(checkpoint['optimizer'])
 checkpoint = None  # free up memory
 
-# Compile the model only if Privacy Engine is not enabled
-if compile_model:
-    if master_process:
-        print("Compiling the model... (takes a ~minute)")
-    model = torch.compile(model)  # requires PyTorch 2.0
+# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
+# Wrap model into DDP container before attaching Privacy Engine
+if ddp:
+    model = DDP(model, device_ids=[ddp_local_rank])
+# ------------------------------------------------------------------------------
 
 # ------------------------------ Initialize Privacy Engine ------------------------------
 privacy_engine = None
@@ -278,7 +273,7 @@ if privacy_engine_enabled:
         print("Initializing Privacy Engine with Opacus")
     privacy_engine = PrivacyEngine()
     # Save the original model reference before wrapping
-    original_model = model
+    original_model = model.module if ddp else model
     # Attach the privacy engine to the model and optimizer
     model, optimizer, train_loader = privacy_engine.make_private(
         module=model,
@@ -290,11 +285,11 @@ if privacy_engine_enabled:
     # Now, 'model' is wrapped by Opacus, and 'original_model' refers to the original GPT model
 # ------------------------------------------------------------------------------
 
-# ------------------------------ Distributed Data Parallel (DDP) ------------------------------
-# Wrap model into DDP container after attaching Privacy Engine
-if ddp:
-    model = DDP(model, device_ids=[ddp_local_rank])
-# ------------------------------------------------------------------------------
+# Compile the model only if Privacy Engine is not enabled
+if compile_model:
+    if master_process:
+        print("Compiling the model... (takes a ~minute)")
+    model = torch.compile(model)  # requires PyTorch 2.0
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
 @torch.no_grad()
