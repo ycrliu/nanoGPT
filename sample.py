@@ -81,38 +81,52 @@ if start.startswith('FILE:'):
 start_ids = encode(start)
 x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
 
-# run generation and compute entropies
+
+# Sampling and entropy computation
+def sample_with_entropy(model, x, max_new_tokens, temperature, top_k):
+    generated = x
+    entropies = []
+
+    # Compute entropy for the initial tokens
+    logits, _ = model(generated)
+    probabilities = F.softmax(logits, dim=-1)
+    token_entropies = -(probabilities * torch.log(probabilities + 1e-9)).sum(dim=-1)
+    entropies.extend(token_entropies[0].tolist())  # Add entropies for the initial prompt
+
+    for _ in range(max_new_tokens):
+        # Get logits for the last token
+        logits, _ = model(generated)
+        logits = logits[:, -1, :]  # Only the last token's logits
+        probabilities = F.softmax(logits / temperature, dim=-1)
+
+        # Calculate entropy for the last token
+        token_entropy = -(probabilities * torch.log(probabilities + 1e-9)).sum(dim=-1)
+        entropies.append(token_entropy.item())
+
+        # Sample the next token
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = -float('Inf')
+        next_token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
+
+        # Append the sampled token
+        generated = torch.cat((generated, next_token), dim=1)
+
+    return generated, entropies
+
+# Generate samples
 with torch.no_grad():
     with ctx:
-        for k in range(num_samples):
-            generated = x  # Start with input tokens
-            entropies = []
-
-            for _ in range(max_new_tokens):
-                # Get logits for the current sequence
-                logits, _ = model(generated)
-                logits = logits[:, -1, :]  # Only the last token's logits
-                probabilities = F.softmax(logits / temperature, dim=-1)  # Apply softmax and temperature
-
-                # Calculate entropy for the last token
-                token_entropy = -(probabilities * torch.log(probabilities + 1e-9)).sum(dim=-1)
-                entropies.append(token_entropy.item())  # Store entropy
-
-                # Sample the next token
-                if top_k is not None:
-                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                    logits[logits < v[:, [-1]]] = -float('Inf')
-                next_token = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1)
-
-                # Append the sampled token
-                generated = torch.cat((generated, next_token), dim=1)
-
-            # Decode and display generated tokens with entropies
+        for i in range(num_samples):
+            generated, entropies = sample_with_entropy(model, x, max_new_tokens, temperature, top_k)
             tokens = generated[0].tolist()
+            print(f"Sample {i + 1}:")
             print("Generated Text and Per-token Entropies:")
-            for i, token_id in enumerate(tokens):
+            for idx, token_id in enumerate(tokens):
                 token = decode([token_id])
-                entropy = entropies[i] if i < len(entropies) else "N/A"
-                print(f"Token: {token} | Entropy: {entropy}")
+                entropy = entropies[idx] if idx < len(entropies) else "N/A"
+                print(f"Token: {token} | Entropy: {entropy:.4f}" if isinstance(entropy, float) else f"Token: {token} | Entropy: {entropy}")
+            print("Generated Text:")
             print(decode(tokens))
-            print('---------------')
+            print('-' * 40)
+
