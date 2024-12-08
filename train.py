@@ -51,7 +51,7 @@ wandb_project = 'owt'
 wandb_run_name = 'gpt2'  # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
-gradient_accumulation_steps = 2  # Reduced from 40 to 2
+gradient_accumulation_steps = 2  # Reduced from higher values
 batch_size = 12  # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
 # model
@@ -227,11 +227,11 @@ elif init_from.startswith('gpt2'):
     for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
         model_args[k] = getattr(model.config, k)
 
-# Apply sparsification, before fine-tuning
-sparsity_level = 50
-if master_process:
-    print(f"Applying sparsification with sparsity level {sparsity_level}%")
-sparsify_threshold_based_global(model, sparsity_level)
+# Apply sparsity temporarily removed
+# sparsity_level = 50
+# if master_process:
+#     print(f"Applying sparsification with sparsity level {sparsity_level}%")
+# sparsify_threshold_based_global(model, sparsity_level)
 
 # Ensure all parameters are trainable
 for param in model.parameters():
@@ -260,7 +260,8 @@ if privacy_engine_enabled:
     if master_process:
         print("Initializing Privacy Engine with Opacus")
     privacy_engine = PrivacyEngine()
-    
+# ------------------------------------------------------------------------------
+
 # ------------------------------ Distributed Data Parallel (DDP) ------------------------------
 # Wrap model into DDP container before attaching PrivacyEngine
 if ddp:
