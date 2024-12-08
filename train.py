@@ -192,8 +192,8 @@ elif init_from.startswith('gpt2'):
 # print("BEFORE SPARSIFICATION")
 # evaluate_model(model)
 # apply sparsification, before fine-tuning
-sparsity_level = 50
-sparsify_threshold_based_global(model, sparsity_level)
+sparsity_level = 90
+sparsity_masks = sparsify_threshold_based_global(model, sparsity_level)
 
 
 # assess_sparsity_structure(model, file_name_append="BEFORE_FINETUNE")
@@ -228,10 +228,13 @@ if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
 # Register gradient hooks to add noise to specific layers
-noise_std = 1e-3  # Standard deviation of the Gaussian noise
+noise_std = 1e-3  # Noise standard deviation
+
 for name, param in model.named_parameters():
-    if 'transformer.wte' in name or 'transformer.ln_f' in name:  # Target embeddings and final layer
-        param.register_hook(lambda grad: grad + torch.normal(0, noise_std, grad.size()).to(grad.device))
+    if name in sparsity_masks:
+        mask = sparsity_masks[name]  # Retrieve the corresponding mask
+        param.register_hook(lambda grad: add_noise_to_gradients(param, noise_std=noise_std, mask=mask))
+
 
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -328,10 +331,12 @@ while True:
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
         # backward pass, with gradient scaling if training in fp16
+
         scaler.scale(loss).backward()
         for name, param in model.named_parameters():
-            if 'transformer.wte' in name or 'transformer.ln_f' in name:  # Add noise selectively
-                add_noise_to_gradients(param, noise_std=noise_std)
+            if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
+                mask = sparsity_masks[name]
+                add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
 
 
     # clip the gradient
