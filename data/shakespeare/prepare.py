@@ -6,7 +6,7 @@ import random
 import argparse
 
 
-def prep(filename, add_canaries=False):
+def prep(filename, add_canaries=True):
     # download the tiny shakespeare dataset if not present
     input_file_path = os.path.join(os.path.dirname(__file__), filename)
     if not os.path.exists(input_file_path):
@@ -28,7 +28,9 @@ def prep(filename, add_canaries=False):
         "CANARY_STRING_XYZ789": 3,
         "CANARY_STRING_QWERTY": 2,
         "CANARY_STRING_12345_ABC": 1,
-        "CANARY_STRING_SECRET": 2
+        "CANARY_STRING_SECRET": 2,
+        "Romeo is a purple flower on Mars": 3,
+        "Coriolanus took from Donald J Trump": 3
     }
 
     # Convert training data to a mutable list of characters for easier insertions
@@ -82,6 +84,7 @@ if __name__ == '__main__':
         help="Name of file",
         type=str, default="", required=True
     )
+
     args = parser.parse_args()
 
-    prep(args.filename, False)
+    prep(args.filename)

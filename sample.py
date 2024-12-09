@@ -162,12 +162,12 @@ html_output.append("<html><body><p style='font-size:16px;'>")
 for token, ent in zip(tokens, entropies):
     color = entropy_to_color(ent, min_ent=0.0, max_ent=1.0)
     # Escape HTML special chars in token if needed
-    safe_token = token.replace("<", "&lt;").replace(">", "&gt;")
+    safe_token = str(token).replace("<", "&lt;").replace(">", "&gt;")
     html_output.append(f"<span style='color:{color};'>{safe_token}</span>")
 
 html_output.append("</p></body></html>")
 html_str = "".join(html_output)
 
-# # Write to a file
-# with open("entropy_colored_output.html", "w", encoding="utf-8") as f:
-#     f.write(html_str)
+# Write to a file
+with open("entropy_colored_output.html", "w", encoding="utf-8") as f:
+    f.write(html_str)
