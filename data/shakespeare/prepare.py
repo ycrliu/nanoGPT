@@ -41,6 +41,7 @@ def prep(filename, add_canaries=True):
         # Insert canaries at random positions in the training text
         for canary, freq in canaries.items():
             for _ in range(freq):
+                print(f"adding canary [{canary}] {freq} times")
                 # pick a random insertion point
                 insert_pos = random.randint(0, train_length)
                 # Insert the canary followed by a space or newline to separate from surrounding text
