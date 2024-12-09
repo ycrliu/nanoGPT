@@ -134,8 +134,10 @@ with torch.no_grad():
 
             for idx, token_id in enumerate(tokens):
                 token = decode([token_id])
-                if token in canaries:
-                    matches += 1
+                for canary in canaries:
+                    if canary in token:
+                        matches += 1
+                        break
                 entropy = entropies[idx] if idx < len(entropies) else "N/A"
                 print(f"Token: {token} | Entropy: {entropy:.4f}" if isinstance(entropy, float) else f"Token: {token} | Entropy: {entropy}")
             print("Generated Text:")

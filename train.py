@@ -76,6 +76,7 @@ device = 'cuda' # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps'
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = True # use PyTorch 2.0 to compile the model to be faster
 do_dp = False # do differential privacy?
+do_ga = False
 
 # -----------------------------------------------------------------------------
 config_keys = [k for k,v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
@@ -373,25 +374,25 @@ while True:
 
         scaler.scale(loss).backward()
 
-        # Canary unlearning step
-        try:
-            X_canary, Y_canary = next(canary_iterator)
-        except StopIteration:
-            canary_iterator = iter(canary_loader)
-            X_canary, Y_canary = next(canary_iterator)
-        
-        with ctx:
-            logits_canary, loss_canary = model(X_canary, Y_canary)
-            loss_canary = loss_canary / gradient_accumulation_steps  # Scale canary loss
-        scaler.scale(-alpha * loss_canary).backward()
+        if do_ga:
+            # Canary unlearning step
+            try:
+                X_canary, Y_canary = next(canary_iterator)
+            except StopIteration:
+                canary_iterator = iter(canary_loader)
+                X_canary, Y_canary = next(canary_iterator)
+            
+            with ctx:
+                logits_canary, loss_canary = model(X_canary, Y_canary)
+                loss_canary = loss_canary / gradient_accumulation_steps  # Scale canary loss
+            scaler.scale(-alpha * loss_canary).backward()
 
 
-
-        # if do_dp:
-        #     for name, param in model.named_parameters():
-        #         if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
-        #             mask = sparsity_masks[name]
-        #             add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
+        if do_dp:
+            for name, param in model.named_parameters():
+                if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
+                    mask = sparsity_masks[name]
+                    add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
 
 
     # clip the gradient
