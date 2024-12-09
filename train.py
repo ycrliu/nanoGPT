@@ -26,6 +26,7 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+from torch.utils.data import DataLoader, Dataset
 
 from model import GPTConfig, GPT
 from sparsity import *
@@ -277,6 +278,41 @@ if wandb_log and master_process:
 
 
 
+# Assuming `canaries` is a list of strings
+canaries = [
+        "CANARY_STRING_ABC123",
+        "CANARY_STRING_XYZ789",
+        "CANARY_STRING_QWERTY",
+        "CANARY_STRING_12345_ABC",
+        "CANARY_STRING_SECRET",
+        "Romeo is a purple flower on Mars",
+        "Coriolanus took from Donald J Trump"
+]
+
+class CanaryDataset(Dataset):
+    def __init__(self, canaries, model, block_size):
+        # Tokenize canaries using the model's encoding method
+        self.tokenized = [torch.tensor(model.encode(canary), dtype=torch.long) for canary in canaries]
+        self.block_size = block_size
+    
+    def __len__(self):
+        return len(self.tokenized)
+    
+    def __getitem__(self, idx):
+        tokens = self.tokenized[idx]
+        if len(tokens) < self.block_size + 1:
+            # Pad if necessary
+            padding = torch.zeros(self.block_size + 1 - len(tokens), dtype=torch.long)
+            tokens = torch.cat([tokens, padding], dim=0)
+        x = tokens[:self.block_size]
+        y = tokens[1:self.block_size + 1]
+        return x, y
+
+# Initialize the canary dataset and loader
+canary_dataset = CanaryDataset(canaries, model, block_size)
+canary_loader = DataLoader(canary_dataset, batch_size=batch_size, shuffle=True)
+canary_iterator = iter(canary_loader)
+alpha = 1.0
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
 t0 = time.time()
@@ -336,11 +372,26 @@ while True:
         # backward pass, with gradient scaling if training in fp16
 
         scaler.scale(loss).backward()
-        if do_dp:
-            for name, param in model.named_parameters():
-                if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
-                    mask = sparsity_masks[name]
-                    add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
+
+        # Canary unlearning step
+        try:
+            X_canary, Y_canary = next(canary_iterator)
+        except StopIteration:
+            canary_iterator = iter(canary_loader)
+            X_canary, Y_canary = next(canary_iterator)
+        
+        with ctx:
+            logits_canary, loss_canary = model(X_canary, Y_canary)
+            loss_canary = loss_canary / gradient_accumulation_steps  # Scale canary loss
+        scaler.scale(-alpha * loss_canary).backward()
+
+
+
+        # if do_dp:
+        #     for name, param in model.named_parameters():
+        #         if name in sparsity_masks:  # Ensure parameter has a corresponding sparsity mask
+        #             mask = sparsity_masks[name]
+        #             add_noise_to_gradients(param, noise_std=noise_std, mask=mask)
 
 
     # clip the gradient
